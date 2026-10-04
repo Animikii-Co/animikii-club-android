@@ -895,20 +895,20 @@ public final class MainActivity extends Activity {
             mainHandler.post(() -> {
                 nowPlayingFetchInFlight = false;
                 if (error == null && result != null) {
-                    nowPlaying = result;
                     if (NowPlayingRequestTracker.INSTANCE.tryApply(requestId)) {
+                        nowPlaying = result;
                         updateMediaSessionMetadata();
-                    }
-                    if (selectedTab == 0) {
-                        updatePlayerUi();
-                        LinearLayout historyContainer = findHomeHistoryContainer();
-                        if (historyContainer != null) {
-                            populateHomeHistory(historyContainer);
+                        if (selectedTab == 0) {
+                            updatePlayerUi();
+                            LinearLayout historyContainer = findHomeHistoryContainer();
+                            if (historyContainer != null) {
+                                populateHomeHistory(historyContainer);
+                            }
+                        } else if (selectedTab == 1) {
+                            showTab(1);
+                        } else if (selectedTab == 2 && !result.isRequestsEnabled()) {
+                            showTab(2);
                         }
-                    } else if (selectedTab == 1) {
-                        showTab(1);
-                    } else if (selectedTab == 2 && !result.isRequestsEnabled()) {
-                        showTab(2);
                     }
                 } else if (selectedTab == 0) {
                     updatePlayerUi();
