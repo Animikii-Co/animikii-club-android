@@ -1,0 +1,1 @@
+Adds an in-app privacy policy and license, plus a source code link. The startup placeholder now reads "Animikii Club".

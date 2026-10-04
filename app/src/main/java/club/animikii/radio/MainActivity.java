@@ -16,6 +16,8 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.method.LinkMovementMethod;
+import android.text.util.Linkify;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,12 +34,18 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
+import club.animikii.radio.core.AboutItem;
 import club.animikii.radio.core.AzuraCastParser;
+import club.animikii.radio.core.LegalDocumentFormatter;
 import club.animikii.radio.core.NowPlayingMetadata;
 import club.animikii.radio.core.NowPlayingRequestTracker;
 import club.animikii.radio.core.PlaybackButtonState;
@@ -237,6 +245,13 @@ public final class MainActivity extends Activity {
         subtitleParams.topMargin = dp(3);
         brandText.addView(brandSubtitle, subtitleParams);
 
+        ImageButton aboutButton = iconButton(R.drawable.ic_info, "About Animikii Club",
+                44, COLOR_MUTED, COLOR_SURFACE);
+        aboutButton.setOnClickListener(view -> showAboutDialog());
+        LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        aboutParams.rightMargin = dp(6);
+        header.addView(aboutButton, aboutParams);
+
         ImageButton shareButton = iconButton(R.drawable.ic_share, "Share Animikii Radio",
                 44, COLOR_MUTED, COLOR_SURFACE);
         shareButton.setOnClickListener(view -> shareStation());
@@ -251,6 +266,76 @@ public final class MainActivity extends Activity {
         root.addView(createBottomNavigation(), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
         setContentView(root);
+    }
+
+    private void showAboutDialog() {
+        AboutItem[] items = AboutItem.values();
+        String[] labels = new String[items.length];
+        for (int i = 0; i < items.length; i++) {
+            labels[i] = items[i].getLabel();
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("About Animikii Club")
+                .setItems(labels, (dialog, which) -> {
+                    AboutItem item = items[which];
+                    if (item.getExternalUrl() != null) {
+                        openExternalUrl(item.getExternalUrl());
+                    } else {
+                        showLegalDocument(item.getLabel(), item.getAssetName());
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void showLegalDocument(String title, String assetName) {
+        TextView content = text(LegalDocumentFormatter.toPlainText(readAssetText(assetName)),
+                13, COLOR_TEXT, false, Gravity.START);
+        content.setLineSpacing(dp(3), 1f);
+        content.setTextIsSelectable(true);
+        Linkify.addLinks(content, Linkify.WEB_URLS | Linkify.EMAIL_ADDRESSES);
+        content.setLinkTextColor(COLOR_ACCENT);
+        content.setMovementMethod(LinkMovementMethod.getInstance());
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setPadding(dp(20), dp(10), dp(20), dp(10));
+        scroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int maxHeight = Math.max(dp(280),
+                Math.round(getResources().getDisplayMetrics().heightPixels * 0.65f));
+        scroll.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, maxHeight));
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(scroll)
+                .setPositiveButton("Done", null)
+                .show();
+    }
+
+    private String readAssetText(String assetName) {
+        try (InputStream input = getAssets().open(assetName);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "This document could not be loaded.";
+        }
+    }
+
+    private void openExternalUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception ignored) {
+            Toast.makeText(this, "No browser is available to open this link.",
+                    Toast.LENGTH_SHORT).show();
+        }
     }
 
     private LinearLayout createBottomNavigation() {
@@ -401,7 +486,8 @@ public final class MainActivity extends Activity {
         page.addView(nowPlayingLabel);
         addSpace(page, 8);
 
-        playingTitle = text("Tune in to Animikii Club", 23, COLOR_TEXT, true, Gravity.CENTER);
+        playingTitle = text(NowPlayingMetadata.DEFAULT_TITLE, 23,
+                COLOR_TEXT, true, Gravity.CENTER);
         playingTitle.setMaxLines(2);
         playingTitle.setEllipsize(TextUtils.TruncateAt.END);
         page.addView(playingTitle, new LinearLayout.LayoutParams(
@@ -939,7 +1025,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (nowPlaying == null) {
-            playingTitle.setText("Tune in to Animikii Club");
+            playingTitle.setText(NowPlayingMetadata.DEFAULT_TITLE);
             playingArtist.setText(NowPlayingMetadata.DEFAULT_ARTIST);
             playingAlbum.setText(NowPlayingMetadata.DEFAULT_ALBUM);
             liveBadge.setText("●  CONNECTING");

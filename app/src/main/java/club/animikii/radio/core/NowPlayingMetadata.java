@@ -2,7 +2,7 @@ package club.animikii.radio.core;
 
 /** Normalized track metadata used by the player and the Android media session. */
 public final class NowPlayingMetadata {
-    public static final String DEFAULT_TITLE = "Animikii Club · Live Radio";
+    public static final String DEFAULT_TITLE = "Animikii Club";
     public static final String DEFAULT_ARTIST = "Eclectic001";
     public static final String DEFAULT_ALBUM = "Turtle Island Ojibwe Edition";
     public static final String DEFAULT_ARTWORK_URL =

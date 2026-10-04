@@ -32,7 +32,7 @@ public class NowPlayingMetadataTest {
     public void missingNowPlayingDataUsesLiveStationMetadata() {
         NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(null);
 
-        assertEquals("Animikii Club · Live Radio", metadata.getTitle());
+        assertEquals("Animikii Club", metadata.getTitle());
         assertEquals("Eclectic001", metadata.getArtist());
         assertEquals("Turtle Island Ojibwe Edition", metadata.getAlbum());
     }

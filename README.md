@@ -27,3 +27,7 @@ The debug APK is for local testing and is written to `app/build/outputs/apk/debu
 The source code is available under the [PolyForm Noncommercial License 1.0.0](LICENSE). It allows noncommercial use, modification, and redistribution; commercial use is not allowed. This is source-available, not open source under the Open Source Definition.
 
 The license covers the project code, not the Animikii Club name, logos, station artwork, music, or third-party software. Those may have separate rights or terms.
+
+## Privacy
+
+The app's [privacy policy](PRIVACY.md) is available here and from the in-app About menu.
