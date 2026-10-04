@@ -1,0 +1,1 @@
+First public release on GitHub (v1.0.0). Play the live stream, check recent tracks, browse the track list, and send song requests.

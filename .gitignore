@@ -1,0 +1,25 @@
+# Gradle, Android Studio, and generated build files
+.gradle/
+local.properties
+**/build/
+.idea/
+*.iml
+.DS_Store
+.cxx/
+.externalNativeBuild/
+captures/
+.kotlin/
+
+# Never commit local signing credentials or environment secrets.
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+.env
+.env.*
+!.env.example
+
+# APKs and bundles are generated artifacts; publish them as release assets.
+*.apk
+*.aab

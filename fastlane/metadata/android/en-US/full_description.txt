@@ -1,0 +1,13 @@
+Listen to Animikii Club's Eclectic001 Turtle Island Ojibwe Edition on Android.
+
+You can:
+- Listen in the background
+- See what's playing and browse recent tracks
+- Search the station's song list and send a request
+- Reconnect automatically after network interruptions
+- View album art when the station provides it
+
+The app uses Animikii Club's public AzuraCast API and 128 kbps MP3 stream. It
+needs an internet connection. Song requests go to the station, and album art
+comes from HTTPS URLs the station provides. No account or station credentials
+are needed.
