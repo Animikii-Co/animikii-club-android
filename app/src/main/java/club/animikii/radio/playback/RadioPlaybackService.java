@@ -18,6 +18,7 @@ import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
 import club.animikii.radio.core.AzuraCastParser;
 import club.animikii.radio.core.NowPlayingMetadata;
+import club.animikii.radio.core.NowPlayingRequestTracker;
 import club.animikii.radio.data.AzuraCastRepository;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -240,6 +241,7 @@ public final class RadioPlaybackService extends MediaSessionService {
             return;
         }
         metadataFetchInFlight = true;
+        final long requestId = NowPlayingRequestTracker.INSTANCE.beginRequest();
         metadataExecutor.execute(() -> {
             AzuraCastParser.NowPlaying loaded = null;
             try {
@@ -253,7 +255,7 @@ public final class RadioPlaybackService extends MediaSessionService {
                 if (serviceDestroyed || player == null) {
                     return;
                 }
-                if (result != null) {
+                if (result != null && NowPlayingRequestTracker.INSTANCE.tryApply(requestId)) {
                     updateMediaItemMetadata(result);
                 }
                 if (player.isPlaying()) {

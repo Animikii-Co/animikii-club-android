@@ -39,6 +39,7 @@ import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import club.animikii.radio.core.AzuraCastParser;
 import club.animikii.radio.core.NowPlayingMetadata;
+import club.animikii.radio.core.NowPlayingRequestTracker;
 import club.animikii.radio.core.PlaybackButtonState;
 import club.animikii.radio.core.RequestPagination;
 import club.animikii.radio.core.RequestSearch;
@@ -880,6 +881,7 @@ public final class MainActivity extends Activity {
             return;
         }
         nowPlayingFetchInFlight = true;
+        final long requestId = NowPlayingRequestTracker.INSTANCE.beginRequest();
         networkExecutor.execute(() -> {
             AzuraCastParser.NowPlaying loaded = null;
             Exception failure = null;
@@ -894,7 +896,9 @@ public final class MainActivity extends Activity {
                 nowPlayingFetchInFlight = false;
                 if (error == null && result != null) {
                     nowPlaying = result;
-                    updateMediaSessionMetadata();
+                    if (NowPlayingRequestTracker.INSTANCE.tryApply(requestId)) {
+                        updateMediaSessionMetadata();
+                    }
                     if (selectedTab == 0) {
                         updatePlayerUi();
                         LinearLayout historyContainer = findHomeHistoryContainer();
