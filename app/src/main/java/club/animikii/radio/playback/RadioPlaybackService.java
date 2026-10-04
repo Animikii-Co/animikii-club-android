@@ -11,20 +11,30 @@ import android.os.SystemClock;
 import android.util.Log;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
+import club.animikii.radio.core.AzuraCastParser;
+import club.animikii.radio.core.NowPlayingMetadata;
+import club.animikii.radio.data.AzuraCastRepository;
+import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Owns live playback and reconnects the station stream after transient network failures. */
 public final class RadioPlaybackService extends MediaSessionService {
     private static final String TAG = "RadioPlaybackService";
     private static final long BUFFERING_STALL_TIMEOUT_MS = 45_000L;
     private static final long NETWORK_RECOVERY_BUFFERING_MS = 10_000L;
+    private static final long NOW_PLAYING_REFRESH_MS = 30_000L;
 
     private ExoPlayer player;
     private MediaSession mediaSession;
     private Handler playerHandler;
+    private final AzuraCastRepository metadataRepository = new AzuraCastRepository();
+    private final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
     private ConnectivityManager connectivityManager;
     private final ReconnectBackoff reconnectBackoff = new ReconnectBackoff();
     private boolean networkCallbackRegistered;
@@ -33,9 +43,11 @@ public final class RadioPlaybackService extends MediaSessionService {
     private boolean shouldAutoResume;
     private boolean reconnectScheduled;
     private boolean serviceDestroyed;
+    private boolean metadataFetchInFlight;
     private long bufferingStartedAtMs = -1L;
 
     private final Runnable reconnectRunnable = this::performReconnect;
+    private final Runnable metadataRefresh = this::fetchNowPlayingMetadata;
     private final Runnable bufferingWatchdog = () -> {
         if (canAutoResume() && player.getPlaybackState() == Player.STATE_BUFFERING) {
             Log.w(TAG, "Stream is still buffering; scheduling a fresh connection attempt.");
@@ -95,8 +107,12 @@ public final class RadioPlaybackService extends MediaSessionService {
                 reconnectBackoff.reset();
                 cancelScheduledReconnect();
                 cancelBufferingWatchdog();
+                startMetadataRefresh();
             } else if (player.getPlaybackState() == Player.STATE_BUFFERING) {
+                stopMetadataRefresh();
                 scheduleBufferingWatchdog();
+            } else {
+                stopMetadataRefresh();
             }
         }
 
@@ -182,7 +198,9 @@ public final class RadioPlaybackService extends MediaSessionService {
         if (playerHandler != null) {
             playerHandler.removeCallbacks(reconnectRunnable);
             playerHandler.removeCallbacks(bufferingWatchdog);
+            playerHandler.removeCallbacks(metadataRefresh);
         }
+        metadataExecutor.shutdownNow();
         if (networkCallbackRegistered && connectivityManager != null) {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback);
@@ -201,6 +219,60 @@ public final class RadioPlaybackService extends MediaSessionService {
             mediaSession = null;
         }
         super.onDestroy();
+    }
+
+    private void startMetadataRefresh() {
+        if (serviceDestroyed || playerHandler == null) {
+            return;
+        }
+        playerHandler.removeCallbacks(metadataRefresh);
+        playerHandler.post(metadataRefresh);
+    }
+
+    private void stopMetadataRefresh() {
+        if (playerHandler != null) {
+            playerHandler.removeCallbacks(metadataRefresh);
+        }
+    }
+
+    private void fetchNowPlayingMetadata() {
+        if (serviceDestroyed || player == null || !player.isPlaying() || metadataFetchInFlight) {
+            return;
+        }
+        metadataFetchInFlight = true;
+        metadataExecutor.execute(() -> {
+            AzuraCastParser.NowPlaying loaded = null;
+            try {
+                loaded = metadataRepository.fetchNowPlaying();
+            } catch (IOException error) {
+                Log.w(TAG, "Could not refresh station media metadata.", error);
+            }
+            final AzuraCastParser.NowPlaying result = loaded;
+            playerHandler.post(() -> {
+                metadataFetchInFlight = false;
+                if (serviceDestroyed || player == null) {
+                    return;
+                }
+                if (result != null) {
+                    updateMediaItemMetadata(result);
+                }
+                if (player.isPlaying()) {
+                    playerHandler.postDelayed(metadataRefresh, NOW_PLAYING_REFRESH_MS);
+                }
+            });
+        });
+    }
+
+    private void updateMediaItemMetadata(AzuraCastParser.NowPlaying nowPlaying) {
+        if (player == null || player.getMediaItemCount() == 0) {
+            return;
+        }
+        int index = player.getCurrentMediaItemIndex();
+        MediaItem currentItem = player.getCurrentMediaItem();
+        NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(nowPlaying);
+        if (index >= 0 && !StationMediaItemFactory.matches(currentItem, metadata)) {
+            player.replaceMediaItem(index, StationMediaItemFactory.create(metadata));
+        }
     }
 
     private void registerNetworkCallback() {

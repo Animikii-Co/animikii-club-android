@@ -33,18 +33,19 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import club.animikii.radio.core.AzuraCastParser;
+import club.animikii.radio.core.NowPlayingMetadata;
 import club.animikii.radio.core.PlaybackButtonState;
 import club.animikii.radio.core.RequestPagination;
 import club.animikii.radio.core.RequestSearch;
 import club.animikii.radio.core.StationRoutes;
 import club.animikii.radio.data.AzuraCastRepository;
 import club.animikii.radio.playback.RadioPlaybackService;
+import club.animikii.radio.playback.StationMediaItemFactory;
 import club.animikii.radio.ui.ImageLoader;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.text.DateFormat;
@@ -406,14 +407,14 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addSpace(page, 6);
 
-        playingArtist = text("Eclectic001 · Turtle Island Ojibwe Edition", 15,
+        playingArtist = text(NowPlayingMetadata.DEFAULT_ARTIST, 15,
                 COLOR_MUTED, false, Gravity.CENTER);
         playingArtist.setMaxLines(2);
         playingArtist.setEllipsize(TextUtils.TruncateAt.END);
         page.addView(playingArtist);
         addSpace(page, 4);
 
-        playingAlbum = text("Eclectic001 · Turtle Island Ojibwe Edition", 12,
+        playingAlbum = text(NowPlayingMetadata.DEFAULT_ALBUM, 12,
                 COLOR_MUTED, false, Gravity.CENTER);
         playingAlbum.setMaxLines(1);
         playingAlbum.setEllipsize(TextUtils.TruncateAt.END);
@@ -893,6 +894,7 @@ public final class MainActivity extends Activity {
                 nowPlayingFetchInFlight = false;
                 if (error == null && result != null) {
                     nowPlaying = result;
+                    updateMediaSessionMetadata();
                     if (selectedTab == 0) {
                         updatePlayerUi();
                         LinearLayout historyContainer = findHomeHistoryContainer();
@@ -934,8 +936,8 @@ public final class MainActivity extends Activity {
         }
         if (nowPlaying == null) {
             playingTitle.setText("Tune in to Animikii Club");
-            playingArtist.setText("Eclectic001 · Turtle Island Ojibwe Edition");
-            playingAlbum.setText("Connecting to the station…");
+            playingArtist.setText(NowPlayingMetadata.DEFAULT_ARTIST);
+            playingAlbum.setText(NowPlayingMetadata.DEFAULT_ALBUM);
             liveBadge.setText("●  CONNECTING");
             liveBadge.setTextColor(COLOR_MUTED);
             listenersBadge.setText("LIVE RADIO");
@@ -944,14 +946,11 @@ public final class MainActivity extends Activity {
         }
 
         boolean online = nowPlaying.isOnline();
-        String title = nowPlaying.getTitle().isEmpty()
-                ? (online ? "Animikii Club is on air" : "The station is offline")
-                : nowPlaying.getTitle();
+        NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(nowPlaying);
+        String title = metadata.getTitle();
         playingTitle.setText(title);
-        playingArtist.setText(emptyFallback(nowPlaying.getArtist(),
-                "Eclectic001 · Turtle Island Ojibwe Edition"));
-        playingAlbum.setText(emptyFallback(nowPlaying.getAlbum(),
-                "Eclectic001 · Turtle Island Ojibwe Edition"));
+        playingArtist.setText(metadata.getArtist());
+        playingAlbum.setText(metadata.getAlbum());
         liveBadge.setText(online ? "●  ON AIR" : "●  OFF AIR");
         liveBadge.setTextColor(online ? COLOR_GREEN : COLOR_RED);
         liveBadge.setBackground(rounded(online ? 0x1E65D6A0 : 0x24FF8585, 16));
@@ -965,7 +964,7 @@ public final class MainActivity extends Activity {
             djLine.setVisibility(View.GONE);
         }
         playingArtwork.setContentDescription("Artwork for " + title);
-        imageLoader.load(nowPlaying.getArtUrl(), playingArtwork, R.drawable.station_icon);
+        imageLoader.load(metadata.getArtworkUrl(), playingArtwork, R.drawable.station_icon);
     }
 
     private void connectMediaController() {
@@ -984,6 +983,7 @@ public final class MainActivity extends Activity {
                 }
                 mediaController = connected;
                 mediaController.addListener(playerListener);
+                updateMediaSessionMetadata();
                 updatePlaybackButton();
             } catch (Exception ignored) {
                 Toast.makeText(this, "Radio controls are still connecting.", Toast.LENGTH_SHORT).show();
@@ -1002,21 +1002,23 @@ public final class MainActivity extends Activity {
             return;
         }
         if (mediaController.getMediaItemCount() == 0) {
-            MediaMetadata metadata = new MediaMetadata.Builder()
-                    .setTitle("Animikii Club · Live Radio")
-                    .setArtist("Eclectic001 Turtle Island Ojibwe Edition")
-                    .setAlbumTitle("Animikii Club")
-                    .setArtworkUri(Uri.parse("https://animikii.club/static/uploads/browser_icon/192.1750185150.png"))
-                    .build();
-            MediaItem item = new MediaItem.Builder()
-                    .setMediaId(StationRoutes.STATION_SHORTCODE)
-                    .setUri(StationRoutes.STREAM_URL)
-                    .setMediaMetadata(metadata)
-                    .build();
-            mediaController.setMediaItem(item);
+            mediaController.setMediaItem(StationMediaItemFactory.create(
+                    NowPlayingMetadata.fromNowPlaying(nowPlaying)));
             mediaController.prepare();
         }
         mediaController.play();
+    }
+
+    private void updateMediaSessionMetadata() {
+        if (mediaController == null || mediaController.getMediaItemCount() == 0) {
+            return;
+        }
+        int index = mediaController.getCurrentMediaItemIndex();
+        MediaItem currentItem = mediaController.getCurrentMediaItem();
+        NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(nowPlaying);
+        if (index >= 0 && !StationMediaItemFactory.matches(currentItem, metadata)) {
+            mediaController.replaceMediaItem(index, StationMediaItemFactory.create(metadata));
+        }
     }
 
     private void updatePlaybackButton() {

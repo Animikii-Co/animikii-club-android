@@ -1,0 +1,1 @@
+Music metadata now shows in the correct Android media notification slots (title, artist, album, artwork) and refreshes while playing. Artist placeholder is "Eclectic001" and album placeholder is "Turtle Island Ojibwe Edition". The app respects the system rotation setting for Samsung's manual rotate button instead of always following the accelerometer.

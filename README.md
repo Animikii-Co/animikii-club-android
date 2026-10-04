@@ -20,7 +20,7 @@ On Windows:
 gradlew.bat lintDebug testDebugUnitTest assembleDebug
 ```
 
-The debug APK is for local testing and is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions runs lint, unit tests, and the debug build on pushes and pull requests to `main`.
+The debug APK is for local testing and is written to `app/build/outputs/apk/debug/app-debug.apk`. Set the `ANIMIKII_RELEASE_*` environment variables before running `assembleRelease` to build a signed release APK; keep the keystore and passwords out of Git. GitHub Actions runs lint, unit tests, and the debug build on pushes and pull requests to `main`.
 
 ## License
 
