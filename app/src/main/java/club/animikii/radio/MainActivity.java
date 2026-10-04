@@ -895,8 +895,8 @@ public final class MainActivity extends Activity {
             mainHandler.post(() -> {
                 nowPlayingFetchInFlight = false;
                 if (error == null && result != null) {
-                    if (NowPlayingRequestTracker.INSTANCE.tryApply(requestId)) {
-                        nowPlaying = result;
+                    if (NowPlayingRequestTracker.INSTANCE.tryApply(
+                            requestId, result, accepted -> nowPlaying = accepted)) {
                         updateMediaSessionMetadata();
                         if (selectedTab == 0) {
                             updatePlayerUi();

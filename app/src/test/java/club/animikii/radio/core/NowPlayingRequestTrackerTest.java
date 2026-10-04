@@ -1,8 +1,10 @@
 package club.animikii.radio.core;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 
 public class NowPlayingRequestTrackerTest {
@@ -45,5 +47,17 @@ public class NowPlayingRequestTrackerTest {
         assertTrue(tracker.tryApply(newerRequest));
         assertFalse("stale response must not be stored", tracker.tryApply(olderRequest));
         assertTrue("a later response must still be accepted", tracker.tryApply(futureRequest));
+    }
+
+    @Test
+    public void staleResponseCannotOverwriteStoredNowPlayingValue() {
+        NowPlayingRequestTracker tracker = new NowPlayingRequestTracker();
+        long staleRequest = tracker.beginRequest();
+        long currentRequest = tracker.beginRequest();
+        AtomicReference<String> storedValue = new AtomicReference<>();
+
+        assertTrue(tracker.tryApply(currentRequest, "current", storedValue::set));
+        assertFalse(tracker.tryApply(staleRequest, "stale", storedValue::set));
+        assertEquals("current", storedValue.get());
     }
 }
