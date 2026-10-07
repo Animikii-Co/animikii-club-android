@@ -10,6 +10,8 @@ public class StationRoutesTest {
     public void buildsPublicNowPlayingAndRequestableSongUrls() {
         assertEquals("https://animikii.club/api/nowplaying/eclectic001",
                 StationRoutes.nowPlayingUrl());
+        assertEquals("https://animikii.club/api/live/nowplaying/sse",
+                StationRoutes.nowPlayingEventsUrl());
         assertEquals("https://animikii.club/api/station/eclectic001/requests",
                 StationRoutes.requestableSongsUrl());
     }

@@ -20,6 +20,10 @@ public final class AzuraCastParser {
             JsonObject live = object(data, "live");
             JsonObject current = object(data, "now_playing");
             JsonObject song = object(current, "song");
+            long playbackId = longValue(current, "sh_id");
+            if (playbackId == 0L) {
+                playbackId = longValue(current, "played_at");
+            }
 
             List<Song> history = new ArrayList<>();
             JsonElement historyElement = data.get("song_history");
@@ -48,7 +52,7 @@ public final class AzuraCastParser {
                     bool(live, "is_live"),
                     bool(station, "requests_enabled"),
                     intValue(listeners, "current", intValue(listeners, "total", 0)),
-                    string(live, "streamer_name"),
+                    string(live, "streamer_name"), playbackId,
                     doubleValue(current, "duration"),
                     doubleValue(current, "elapsed"),
                     history);
@@ -230,6 +234,7 @@ public final class AzuraCastParser {
         private final boolean requestsEnabled;
         private final int listenerCount;
         private final String streamerName;
+        private final long playbackId;
         private final double durationSeconds;
         private final double elapsedSeconds;
         private final List<Song> history;
@@ -238,7 +243,8 @@ public final class AzuraCastParser {
                            String streamUrl, String publicPlayerUrl, String title,
                            String artist, String album, String artUrl, boolean online,
                            boolean live, boolean requestsEnabled, int listenerCount,
-                           String streamerName, double durationSeconds, double elapsedSeconds,
+                           String streamerName, long playbackId, double durationSeconds,
+                           double elapsedSeconds,
                            List<Song> history) {
             this.stationName = stationName;
             this.stationShortcode = stationShortcode;
@@ -254,6 +260,7 @@ public final class AzuraCastParser {
             this.requestsEnabled = requestsEnabled;
             this.listenerCount = listenerCount;
             this.streamerName = streamerName;
+            this.playbackId = playbackId;
             this.durationSeconds = durationSeconds;
             this.elapsedSeconds = elapsedSeconds;
             this.history = Collections.unmodifiableList(new ArrayList<>(history));
@@ -261,7 +268,7 @@ public final class AzuraCastParser {
 
         private static NowPlaying empty() {
             return new NowPlaying("", "", "", "", "", "", "", "", "",
-                    false, false, false, 0, "", 0d, 0d, Collections.emptyList());
+                    false, false, false, 0, "", 0L, 0d, 0d, Collections.emptyList());
         }
 
         public String getStationName() { return stationName; }
@@ -278,6 +285,7 @@ public final class AzuraCastParser {
         public boolean isRequestsEnabled() { return requestsEnabled; }
         public int getListenerCount() { return listenerCount; }
         public String getStreamerName() { return streamerName; }
+        public long getPlaybackId() { return playbackId; }
         public double getDurationSeconds() { return durationSeconds; }
         public double getElapsedSeconds() { return elapsedSeconds; }
         public List<Song> getHistory() { return history; }

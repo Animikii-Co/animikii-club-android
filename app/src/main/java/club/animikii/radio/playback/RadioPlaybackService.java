@@ -13,29 +13,27 @@ import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
-import club.animikii.radio.core.AzuraCastParser;
+import club.animikii.radio.core.AzuraCastParser.NowPlaying;
 import club.animikii.radio.core.NowPlayingMetadata;
-import club.animikii.radio.core.NowPlayingRequestTracker;
-import club.animikii.radio.data.AzuraCastRepository;
-import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import club.animikii.radio.core.TrackProgress;
+import club.animikii.radio.data.NowPlayingUpdateManager;
 
 /** Owns live playback and reconnects the station stream after transient network failures. */
+@UnstableApi
 public final class RadioPlaybackService extends MediaSessionService {
     private static final String TAG = "RadioPlaybackService";
     private static final long BUFFERING_STALL_TIMEOUT_MS = 45_000L;
     private static final long NETWORK_RECOVERY_BUFFERING_MS = 10_000L;
-    private static final long NOW_PLAYING_REFRESH_MS = 30_000L;
 
     private ExoPlayer player;
     private MediaSession mediaSession;
     private Handler playerHandler;
-    private final AzuraCastRepository metadataRepository = new AzuraCastRepository();
-    private final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
+    private final TrackProgress trackProgress =
+            NowPlayingUpdateManager.getInstance().getTrackProgress();
     private ConnectivityManager connectivityManager;
     private final ReconnectBackoff reconnectBackoff = new ReconnectBackoff();
     private boolean networkCallbackRegistered;
@@ -44,11 +42,11 @@ public final class RadioPlaybackService extends MediaSessionService {
     private boolean shouldAutoResume;
     private boolean reconnectScheduled;
     private boolean serviceDestroyed;
-    private boolean metadataFetchInFlight;
+    private NowPlayingUpdateManager.Subscription nowPlayingSubscription;
+    private long nowPlayingSubscriptionGeneration;
     private long bufferingStartedAtMs = -1L;
 
     private final Runnable reconnectRunnable = this::performReconnect;
-    private final Runnable metadataRefresh = this::fetchNowPlayingMetadata;
     private final Runnable bufferingWatchdog = () -> {
         if (canAutoResume() && player.getPlaybackState() == Player.STATE_BUFFERING) {
             Log.w(TAG, "Stream is still buffering; scheduling a fresh connection attempt.");
@@ -108,12 +106,12 @@ public final class RadioPlaybackService extends MediaSessionService {
                 reconnectBackoff.reset();
                 cancelScheduledReconnect();
                 cancelBufferingWatchdog();
-                startMetadataRefresh();
+                startNowPlayingUpdates();
             } else if (player.getPlaybackState() == Player.STATE_BUFFERING) {
-                stopMetadataRefresh();
+                stopNowPlayingUpdates();
                 scheduleBufferingWatchdog();
             } else {
-                stopMetadataRefresh();
+                stopNowPlayingUpdates();
             }
         }
 
@@ -175,7 +173,8 @@ public final class RadioPlaybackService extends MediaSessionService {
                 .build();
         player.setAudioAttributes(audioAttributes, true);
         player.setHandleAudioBecomingNoisy(true);
-        mediaSession = new MediaSession.Builder(this, player).build();
+        mediaSession = new MediaSession.Builder(this,
+                new NowPlayingMediaSessionPlayer(player, trackProgress)).build();
         registerNetworkCallback();
     }
 
@@ -199,9 +198,8 @@ public final class RadioPlaybackService extends MediaSessionService {
         if (playerHandler != null) {
             playerHandler.removeCallbacks(reconnectRunnable);
             playerHandler.removeCallbacks(bufferingWatchdog);
-            playerHandler.removeCallbacks(metadataRefresh);
         }
-        metadataExecutor.shutdownNow();
+        stopNowPlayingUpdates();
         if (networkCallbackRegistered && connectivityManager != null) {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback);
@@ -222,50 +220,29 @@ public final class RadioPlaybackService extends MediaSessionService {
         super.onDestroy();
     }
 
-    private void startMetadataRefresh() {
-        if (serviceDestroyed || playerHandler == null) {
+    private void startNowPlayingUpdates() {
+        if (serviceDestroyed || playerHandler == null || nowPlayingSubscription != null) {
             return;
         }
-        playerHandler.removeCallbacks(metadataRefresh);
-        playerHandler.post(metadataRefresh);
+        long subscriptionGeneration = ++nowPlayingSubscriptionGeneration;
+        nowPlayingSubscription = NowPlayingUpdateManager.getInstance().subscribe(nowPlaying ->
+                playerHandler.post(() -> {
+                    if (!serviceDestroyed && player != null && nowPlayingSubscription != null
+                            && subscriptionGeneration == nowPlayingSubscriptionGeneration) {
+                        updateMediaItemMetadata(nowPlaying);
+                    }
+                }));
     }
 
-    private void stopMetadataRefresh() {
-        if (playerHandler != null) {
-            playerHandler.removeCallbacks(metadataRefresh);
+    private void stopNowPlayingUpdates() {
+        nowPlayingSubscriptionGeneration++;
+        if (nowPlayingSubscription != null) {
+            nowPlayingSubscription.close();
+            nowPlayingSubscription = null;
         }
     }
 
-    private void fetchNowPlayingMetadata() {
-        if (serviceDestroyed || player == null || !player.isPlaying() || metadataFetchInFlight) {
-            return;
-        }
-        metadataFetchInFlight = true;
-        final long requestId = NowPlayingRequestTracker.INSTANCE.beginRequest();
-        metadataExecutor.execute(() -> {
-            AzuraCastParser.NowPlaying loaded = null;
-            try {
-                loaded = metadataRepository.fetchNowPlaying();
-            } catch (IOException error) {
-                Log.w(TAG, "Could not refresh station media metadata.", error);
-            }
-            final AzuraCastParser.NowPlaying result = loaded;
-            playerHandler.post(() -> {
-                metadataFetchInFlight = false;
-                if (serviceDestroyed || player == null) {
-                    return;
-                }
-                if (result != null && NowPlayingRequestTracker.INSTANCE.tryApply(requestId)) {
-                    updateMediaItemMetadata(result);
-                }
-                if (player.isPlaying()) {
-                    playerHandler.postDelayed(metadataRefresh, NOW_PLAYING_REFRESH_MS);
-                }
-            });
-        });
-    }
-
-    private void updateMediaItemMetadata(AzuraCastParser.NowPlaying nowPlaying) {
+    private void updateMediaItemMetadata(NowPlaying nowPlaying) {
         if (player == null || player.getMediaItemCount() == 0) {
             return;
         }

@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -41,18 +42,20 @@ import java.nio.charset.StandardCharsets;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import club.animikii.radio.core.AboutItem;
 import club.animikii.radio.core.AzuraCastParser;
 import club.animikii.radio.core.LegalDocumentFormatter;
 import club.animikii.radio.core.NowPlayingMetadata;
-import club.animikii.radio.core.NowPlayingRequestTracker;
 import club.animikii.radio.core.PlaybackButtonState;
 import club.animikii.radio.core.RequestPagination;
 import club.animikii.radio.core.RequestSearch;
 import club.animikii.radio.core.StationRoutes;
+import club.animikii.radio.core.TrackProgress;
 import club.animikii.radio.data.AzuraCastRepository;
+import club.animikii.radio.data.NowPlayingUpdateManager;
 import club.animikii.radio.playback.RadioPlaybackService;
 import club.animikii.radio.playback.StationMediaItemFactory;
 import club.animikii.radio.ui.ImageLoader;
@@ -68,6 +71,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Main Animikii Club screen: live player, recent history, and listener requests. */
+@UnstableApi
 public final class MainActivity extends Activity {
     private static final int COLOR_BACKGROUND = Color.rgb(17, 19, 24);
     private static final int COLOR_SURFACE = Color.rgb(26, 31, 39);
@@ -79,11 +83,13 @@ public final class MainActivity extends Activity {
     private static final int COLOR_RED = Color.rgb(255, 133, 133);
     private static final int REQUEST_PAGE_SIZE = 20;
     private static final int REQUEST_PREFETCH_DISTANCE_DP = 240;
-    private static final long NOW_PLAYING_REFRESH_MS = 30_000L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService networkExecutor = Executors.newFixedThreadPool(2);
     private final AzuraCastRepository repository = new AzuraCastRepository();
+    private final NowPlayingUpdateManager nowPlayingUpdates =
+            NowPlayingUpdateManager.getInstance();
+    private final TrackProgress trackProgress = nowPlayingUpdates.getTrackProgress();
     private final RequestPagination requestPagination = new RequestPagination(REQUEST_PAGE_SIZE);
     private final Player.Listener playerListener = new Player.Listener() {
         @Override
@@ -102,14 +108,16 @@ public final class MainActivity extends Activity {
         }
     };
 
-    private final Runnable nowPlayingPoll = new Runnable() {
+    private final Runnable trackProgressRefresh = new Runnable() {
         @Override
         public void run() {
             if (!activityStarted) {
                 return;
             }
-            fetchNowPlaying();
-            mainHandler.postDelayed(this, NOW_PLAYING_REFRESH_MS);
+            if (selectedTab == 0) {
+                updateTrackProgressUi();
+            }
+            mainHandler.postDelayed(this, 1_000L);
         }
     };
 
@@ -120,9 +128,10 @@ public final class MainActivity extends Activity {
     private View[] navIndicators;
     private int selectedTab;
     private boolean activityStarted;
-    private boolean nowPlayingFetchInFlight;
     private boolean requestFetchInFlight;
     private boolean requestsLoaded;
+    private NowPlayingUpdateManager.Subscription nowPlayingSubscription;
+    private long nowPlayingSubscriptionGeneration;
     private List<AzuraCastParser.RequestableSong> requestableSongs = Collections.emptyList();
     private AzuraCastParser.NowPlaying nowPlaying;
     private ListenableFuture<MediaController> controllerFuture;
@@ -134,6 +143,10 @@ public final class MainActivity extends Activity {
     private TextView playingTitle;
     private TextView playingArtist;
     private TextView playingAlbum;
+    private LinearLayout trackProgressContainer;
+    private ProgressBar trackProgressBar;
+    private TextView elapsedTrackTime;
+    private TextView totalTrackTime;
     private ImageView playingArtwork;
     private ImageButton playButton;
     private ProgressBar playSpinner;
@@ -161,21 +174,23 @@ public final class MainActivity extends Activity {
         activityStarted = true;
         connectMediaController();
         updatePlaybackButton();
-        fetchNowPlaying();
-        mainHandler.removeCallbacks(nowPlayingPoll);
-        mainHandler.postDelayed(nowPlayingPoll, NOW_PLAYING_REFRESH_MS);
+        startTrackingNowPlaying();
+        mainHandler.removeCallbacks(trackProgressRefresh);
+        mainHandler.post(trackProgressRefresh);
     }
 
     @Override
     protected void onStop() {
         activityStarted = false;
-        mainHandler.removeCallbacks(nowPlayingPoll);
+        mainHandler.removeCallbacks(trackProgressRefresh);
+        stopTrackingNowPlaying();
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
-        mainHandler.removeCallbacks(nowPlayingPoll);
+        mainHandler.removeCallbacks(trackProgressRefresh);
+        stopTrackingNowPlaying();
         networkExecutor.shutdownNow();
         if (imageLoader != null) {
             imageLoader.close();
@@ -428,6 +443,10 @@ public final class MainActivity extends Activity {
         playingTitle = null;
         playingArtist = null;
         playingAlbum = null;
+        trackProgressContainer = null;
+        trackProgressBar = null;
+        elapsedTrackTime = null;
+        totalTrackTime = null;
         playingArtwork = null;
         playButton = null;
         playSpinner = null;
@@ -506,6 +525,35 @@ public final class MainActivity extends Activity {
         playingAlbum.setMaxLines(1);
         playingAlbum.setEllipsize(TextUtils.TruncateAt.END);
         page.addView(playingAlbum);
+
+        trackProgressContainer = new LinearLayout(this);
+        trackProgressContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout timeLabels = new LinearLayout(this);
+        timeLabels.setOrientation(LinearLayout.HORIZONTAL);
+        timeLabels.setGravity(Gravity.CENTER_VERTICAL);
+        elapsedTrackTime = text("0:00", 10, COLOR_MUTED, false, Gravity.CENTER_VERTICAL);
+        totalTrackTime = text("0:00", 10, COLOR_MUTED, false, Gravity.CENTER_VERTICAL);
+        timeLabels.addView(elapsedTrackTime);
+        View timeSpacer = new View(this);
+        timeLabels.addView(timeSpacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        timeLabels.addView(totalTrackTime);
+        trackProgressContainer.addView(timeLabels);
+        addSpace(trackProgressContainer, 3);
+        trackProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        trackProgressBar.setIndeterminate(false);
+        trackProgressBar.setMax(TrackProgress.PROGRESS_MAX);
+        trackProgressBar.setProgressTintList(
+                android.content.res.ColorStateList.valueOf(COLOR_ACCENT));
+        trackProgressBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(COLOR_SURFACE_HIGH));
+        trackProgressBar.setMinimumHeight(dp(4));
+        trackProgressContainer.addView(trackProgressBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(4)));
+        trackProgressContainer.setVisibility(View.GONE);
+        LinearLayout.LayoutParams trackProgressParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        trackProgressParams.topMargin = dp(12);
+        page.addView(trackProgressContainer, trackProgressParams);
 
         TextView streamQuality = badge("MP3 128k", COLOR_MUTED, COLOR_SURFACE_HIGH);
         LinearLayout.LayoutParams streamQualityParams = new LinearLayout.LayoutParams(
@@ -962,45 +1010,53 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void fetchNowPlaying() {
-        if (nowPlayingFetchInFlight || !activityStarted) {
+    private void startTrackingNowPlaying() {
+        if (nowPlayingSubscription != null) {
             return;
         }
-        nowPlayingFetchInFlight = true;
-        final long requestId = NowPlayingRequestTracker.INSTANCE.beginRequest();
-        networkExecutor.execute(() -> {
-            AzuraCastParser.NowPlaying loaded = null;
-            Exception failure = null;
-            try {
-                loaded = repository.fetchNowPlaying();
-            } catch (Exception exception) {
-                failure = exception;
+        long subscriptionGeneration = ++nowPlayingSubscriptionGeneration;
+        nowPlayingSubscription = nowPlayingUpdates.subscribe(result -> mainHandler.post(() -> {
+            if (!activityStarted || result == null || nowPlayingSubscription == null
+                    || subscriptionGeneration != nowPlayingSubscriptionGeneration) {
+                return;
             }
-            final AzuraCastParser.NowPlaying result = loaded;
-            final Exception error = failure;
-            mainHandler.post(() -> {
-                nowPlayingFetchInFlight = false;
-                if (error == null && result != null) {
-                    if (NowPlayingRequestTracker.INSTANCE.tryApply(
-                            requestId, result, accepted -> nowPlaying = accepted)) {
-                        updateMediaSessionMetadata();
-                        if (selectedTab == 0) {
-                            updatePlayerUi();
-                            LinearLayout historyContainer = findHomeHistoryContainer();
-                            if (historyContainer != null) {
-                                populateHomeHistory(historyContainer);
-                            }
-                        } else if (selectedTab == 1) {
-                            showTab(1);
-                        } else if (selectedTab == 2 && !result.isRequestsEnabled()) {
-                            showTab(2);
-                        }
-                    }
-                } else if (selectedTab == 0) {
-                    updatePlayerUi();
+            nowPlaying = result;
+            // The service owns active MediaSession metadata updates; this callback is UI-only.
+            if (selectedTab == 0) {
+                updatePlayerUi();
+                LinearLayout historyContainer = findHomeHistoryContainer();
+                if (historyContainer != null) {
+                    populateHomeHistory(historyContainer);
                 }
-            });
-        });
+            } else if (selectedTab == 1) {
+                showTab(1);
+            } else if (selectedTab == 2 && !result.isRequestsEnabled()) {
+                showTab(2);
+            }
+        }));
+    }
+
+    private void stopTrackingNowPlaying() {
+        nowPlayingSubscriptionGeneration++;
+        if (nowPlayingSubscription != null) {
+            nowPlayingSubscription.close();
+            nowPlayingSubscription = null;
+        }
+    }
+
+    private void updateTrackProgressUi() {
+        if (trackProgressContainer == null || trackProgressBar == null) {
+            return;
+        }
+        if (!trackProgress.hasProgress()) {
+            trackProgressContainer.setVisibility(View.GONE);
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        trackProgressContainer.setVisibility(View.VISIBLE);
+        trackProgressBar.setProgress(trackProgress.getProgressPermille(now));
+        elapsedTrackTime.setText(TrackProgress.formatTime(trackProgress.getPositionMs(now)));
+        totalTrackTime.setText(TrackProgress.formatTime(trackProgress.getDurationMs()));
     }
 
     private LinearLayout findHomeHistoryContainer() {
@@ -1032,6 +1088,7 @@ public final class MainActivity extends Activity {
             liveBadge.setTextColor(COLOR_MUTED);
             listenersBadge.setText("LIVE RADIO");
             imageLoader.load(null, playingArtwork, R.drawable.station_icon);
+            updateTrackProgressUi();
             return;
         }
 
@@ -1055,6 +1112,7 @@ public final class MainActivity extends Activity {
         }
         playingArtwork.setContentDescription("Artwork for " + title);
         imageLoader.load(metadata.getArtworkUrl(), playingArtwork, R.drawable.station_icon);
+        updateTrackProgressUi();
     }
 
     private void connectMediaController() {

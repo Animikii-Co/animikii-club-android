@@ -91,4 +91,24 @@ public class AzuraCastParserTest {
         assertFalse(result.isRequestsEnabled());
         assertTrue(result.getHistory().isEmpty());
     }
+
+    @Test
+    public void exposesPlaybackInstanceIdForProgressReset() {
+        String json = "{\"station\":{},\"now_playing\":{\"sh_id\":321,\"played_at\":1000,"
+                + "\"song\":{\"title\":\"Track\"}},\"is_online\":true}";
+
+        AzuraCastParser.NowPlaying result = parser.parseNowPlaying(json, "eclectic001");
+
+        assertEquals(321L, result.getPlaybackId());
+    }
+
+    @Test
+    public void fallsBackToPlayedAtWhenPlaybackInstanceIdIsMissing() {
+        String json = "{\"station\":{},\"now_playing\":{\"played_at\":1000,"
+                + "\"song\":{\"title\":\"Track\"}},\"is_online\":true}";
+
+        AzuraCastParser.NowPlaying result = parser.parseNowPlaying(json, "eclectic001");
+
+        assertEquals(1000L, result.getPlaybackId());
+    }
 }

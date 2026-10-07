@@ -14,6 +14,10 @@ public final class StationRoutes {
         return API_ROOT + "/nowplaying/" + STATION_SHORTCODE;
     }
 
+    public static String nowPlayingEventsUrl() {
+        return API_ROOT + "/live/nowplaying/sse";
+    }
+
     public static String requestableSongsUrl() {
         return API_ROOT + "/station/" + STATION_SHORTCODE + "/requests";
     }

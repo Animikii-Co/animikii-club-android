@@ -40,7 +40,8 @@ public class NowPlayingMetadataTest {
     @Test
     public void mapsAzuraCastTrackFieldsIntoMatchingMediaSlots() {
         String json = "{\"station\":{\"shortcode\":\"eclectic001\"},"
-                + "\"now_playing\":{\"song\":{\"title\":\"North Wind\","
+                + "\"now_playing\":{\"duration\":197,\"elapsed\":87,"
+                + "\"song\":{\"title\":\"North Wind\","
                 + "\"artist\":\"Kani\",\"album\":\"Story Album\","
                 + "\"art\":\"https://animikii.club/north-wind.jpg\"}},"
                 + "\"is_online\":true}";
@@ -53,6 +54,27 @@ public class NowPlayingMetadataTest {
         assertEquals("Kani", metadata.getArtist());
         assertEquals("Story Album", metadata.getAlbum());
         assertEquals("https://animikii.club/north-wind.jpg", metadata.getArtworkUrl());
+        assertEquals(197_000L, metadata.getDurationMs());
+    }
+
+    @Test
+    public void missingNowPlayingDurationDoesNotAdvertiseASeekBarLength() {
+        NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(null);
+
+        assertEquals(0L, metadata.getDurationMs());
+        assertEquals(0L, metadata.getPlaybackId());
+    }
+
+    @Test
+    public void preservesPlaybackInstanceIdToResetMediaSessionProgress() {
+        String json = "{\"station\":{},\"now_playing\":{\"sh_id\":321,\"duration\":197,"
+                + "\"elapsed\":87,\"song\":{\"title\":\"Track\"}},\"is_online\":true}";
+        AzuraCastParser.NowPlaying current = new AzuraCastParser()
+                .parseNowPlaying(json, "eclectic001");
+
+        NowPlayingMetadata metadata = NowPlayingMetadata.fromNowPlaying(current);
+
+        assertEquals(321L, metadata.getPlaybackId());
     }
 
     @Test
